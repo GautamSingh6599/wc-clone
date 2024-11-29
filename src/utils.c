@@ -12,10 +12,11 @@ void parse_args(int argc, char *argv[]) {
   long total_lines = 0;
   long num_files = 0;
   int option = 0;
+  int read_from_stdin = 0;
+
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--help") == 0) {
       option = PRINT_HELP;
-      continue;
       break;
     }
     if (strcmp(argv[i], "--ver") == 0) {
@@ -28,19 +29,15 @@ void parse_args(int argc, char *argv[]) {
         switch (argv[i][j]) {
         case 'l':
           option |= LINES;
-          continue;
           break;
         case 'c':
           option |= BYTE;
-          continue;
           break;
         case 'm':
           option |= CHARS;
-          continue;
           break;
         case 'w':
           option |= WORDS;
-          continue;
           break;
         default:
           printf("ccwc: invalid option -- '%c'\n", argv[i][j]);
@@ -60,57 +57,97 @@ void parse_args(int argc, char *argv[]) {
     }
     if (file_exists(argv[i])) {
       num_files++;
-      file = realloc(file, num_files * sizeof(char));
+      file = realloc(file, num_files * sizeof(char *));
       file[num_files - 1] = argv[i];
     } else {
       printf("ccwc: %s: No such file or directory\n", argv[i]);
       return;
     }
   }
+  if (num_files == 0) {
+    read_from_stdin = 1;
+  }
   if (option == 0) {
     option = LINES | WORDS | BYTE;
   }
-  for (int file_index = 0; file_index < num_files; file_index++) {
+  if (read_from_stdin) {
+    FILE *file;
+    file = tmpfile();
+    if (file == NULL) {
+      perror("Failed to create temporary file");
+    }
+
+    // Write stdin to the temporary file
+    char c;
+    while ((c = fgetc(stdin)) != EOF) {
+      fputc(c, file);
+    }
+
+    rewind(file);
+
     if (option & LINES) {
-      long lines = calculate_lines(file[file_index]);
-      if (lines == FILE_OPEN_ERROR) {
-        printf("ccwc: %s: No such file or directory\n", file[file_index]);
-        return;
-      }
+      long lines = calculate_lines_stdin(file);
       printf("%10ld ", lines);
-      total_lines += lines;
     }
     if (option & WORDS) {
-      long words = calculate_words(file[file_index]);
-      if (words == FILE_OPEN_ERROR) {
-        printf("ccwc: %s: No such file or directory\n", file[file_index]);
-        return;
-      }
+      long words = calculate_words_stdin(file);
       printf("%10ld ", words);
-      total_words += words;
     }
     if (option & BYTE) {
-      long bytes = calculate_bytes(file[file_index]);
-      if (bytes == FILE_OPEN_ERROR) {
-        printf("ccwc: %s: No such file or directory\n", file[file_index]);
-        return;
-      }
+      long bytes = calculate_bytes_stdin(file);
       printf("%10ld ", bytes);
-      total_bytes += bytes;
     }
     if (option & CHARS) {
-      long chars = calculate_chars(file[file_index]);
-      if (chars == FILE_OPEN_ERROR) {
-        printf("ccwc: %s: No such file or directory\n", file[file_index]);
-        return;
-      }
+      long chars = calculate_chars_stdin(file);
       printf("%10ld ", chars);
-      total_chars += chars;
     }
-    printf("%s\n", file[file_index]);
-  }
-  if (num_files > 1) {
-    printf("%10ld %10ld %10ld total\n", total_lines, total_words, total_bytes);
+
+    fclose(file);
+
+  } else {
+    for (int file_index = 0; file_index < num_files; file_index++) {
+      if (option & LINES) {
+        long lines = calculate_lines(file[file_index]);
+        if (lines == FILE_OPEN_ERROR) {
+          printf("ccwc: %s: No such file or directory\n", file[file_index]);
+          return;
+        }
+        printf("%10ld ", lines);
+        total_lines += lines;
+      }
+      if (option & WORDS) {
+        long words = calculate_words(file[file_index]);
+        if (words == FILE_OPEN_ERROR) {
+          printf("ccwc: %s: No such file or directory\n", file[file_index]);
+          return;
+        }
+        printf("%10ld ", words);
+        total_words += words;
+      }
+      if (option & BYTE) {
+        long bytes = calculate_bytes(file[file_index]);
+        if (bytes == FILE_OPEN_ERROR) {
+          printf("ccwc: %s: No such file or directory\n", file[file_index]);
+          return;
+        }
+        printf("%10ld ", bytes);
+        total_bytes += bytes;
+      }
+      if (option & CHARS) {
+        long chars = calculate_chars(file[file_index]);
+        if (chars == FILE_OPEN_ERROR) {
+          printf("ccwc: %s: No such file or directory\n", file[file_index]);
+          return;
+        }
+        printf("%10ld ", chars);
+        total_chars += chars;
+      }
+      printf("%s\n", file[file_index]);
+    }
+    if (num_files > 1) {
+      printf("%10ld %10ld %10ld total\n", total_lines, total_words,
+             total_bytes);
+    }
   }
 }
 
@@ -129,6 +166,7 @@ long calculate_bytes(char *filename) {
   FILE *file;
   file = fopen(filename, "rb");
   if (file == NULL) {
+    fclose(file);
     return FILE_OPEN_ERROR;
   }
   fseek(file, 0, SEEK_END);
@@ -137,10 +175,18 @@ long calculate_bytes(char *filename) {
   return size;
 }
 
+long calculate_bytes_stdin(FILE *file) {
+  fseek(file, 0, SEEK_END);
+  long size = ftell(file);
+  rewind(file);
+  return size;
+}
+
 long calculate_lines(char *filename) {
   FILE *file;
   file = fopen(filename, "r");
   if (file == NULL) {
+    fclose(file);
     return FILE_OPEN_ERROR;
   }
   long lines = 0;
@@ -150,15 +196,27 @@ long calculate_lines(char *filename) {
       lines++;
     }
   }
-  lines++; // Count last line
-  return lines;
   fclose(file);
+  return lines;
+}
+
+long calculate_lines_stdin(FILE *file) {
+  long lines = 0;
+  char c;
+  while ((c = fgetc(file)) != EOF) {
+    if (c == '\n') {
+      lines++;
+    }
+  }
+  rewind(file);
+  return lines;
 }
 
 long calculate_words(char *filename) {
   FILE *file;
   file = fopen(filename, "r");
   if (file == NULL) {
+    fclose(file);
     return FILE_OPEN_ERROR;
   }
   long words = 0;
@@ -187,10 +245,37 @@ long calculate_words(char *filename) {
   return words;
 }
 
+long calculate_words_stdin(FILE *file) {
+  long words = 0;
+  char c;
+  int in_word = 0; // Tracks whether we're currently inside a word
+
+  while ((c = fgetc(file)) != EOF) {
+    if (c == ' ' || c == '\n' || c == '\t' || c == '\r') {
+      if (in_word) {
+        // Transition from inside a word to whitespace
+        words++;
+        in_word = 0; // Reset in_word flag
+      }
+    } else {
+      // Encountered a non-whitespace character
+      in_word = 1;
+    }
+  }
+
+  // If the file ends while still in a word, count the last word
+  if (in_word) {
+    words++;
+  }
+  rewind(file);
+  return words;
+}
+
 long calculate_chars(char *filename) {
   FILE *file;
   file = fopen(filename, "r");
   if (file == NULL) {
+    fclose(file);
     return FILE_OPEN_ERROR;
   }
   long chars = 0;
@@ -199,5 +284,15 @@ long calculate_chars(char *filename) {
     chars++;
   }
   fclose(file);
+  return chars;
+}
+
+long calculate_chars_stdin(FILE *file) {
+  long chars = 0;
+  char c;
+  while ((c = fgetc(file)) != EOF) {
+    chars++;
+  }
+  rewind(file);
   return chars;
 }
