@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Werror -g
-SRC = src/main.c
+SRC = src/main.c src/utils.c
 # Header files
 INCLUDES = -I include/
 # Output executable
